@@ -1,7 +1,6 @@
 ﻿using System;
 using SiraUtil.Affinity;
 using UnityEngine;
-using Object = UnityEngine.Object;
 
 namespace SoundReplacer.Patches
 {
@@ -9,58 +8,20 @@ namespace SoundReplacer.Patches
     {
         private readonly ResultsViewController _resultsViewController;
         private readonly SongPreviewPlayer _songPreviewPlayer;
+        private readonly SoundLoader _soundLoader;
         private readonly PluginConfig _config;
-        private readonly AudioClip _emptySound = SoundLoader.GetEmptyAudioClip();
+
         private readonly AudioClip _originalLevelClearedSound;
+        private AudioClip? _levelClearedSound;
+        private AudioClip? _levelFailedSound;
 
-        private AudioClip _customLevelClearedSound;
-        private string? _lastClearedSoundSelected;
-
-        private AudioClip _customLevelFailedSound;
-        private string? _lastFailedSoundSelected;
-
-        private LevelClearedSoundPatch(ResultsViewController resultsViewController, SongPreviewPlayer songPreviewPlayer, PluginConfig config)
+        private LevelClearedSoundPatch(ResultsViewController resultsViewController, SongPreviewPlayer songPreviewPlayer, SoundLoader soundLoader, PluginConfig config)
         {
             _resultsViewController = resultsViewController;
             _songPreviewPlayer = songPreviewPlayer;
+            _soundLoader = soundLoader;
             _config = config;
             _originalLevelClearedSound = resultsViewController._levelClearedAudioClip;
-            _customLevelClearedSound = _emptySound;
-            _customLevelFailedSound = _emptySound;
-        }
-
-        private AudioClip GetCustomLevelClearedSound()
-        {
-            if (_lastClearedSoundSelected == _config.SuccessSound)
-            {
-                return _customLevelClearedSound;
-            }
-            _lastClearedSoundSelected = _config.SuccessSound;
-
-            if (_customLevelClearedSound != _emptySound)
-            {
-                Object.Destroy(_customLevelClearedSound);
-            }
-
-            var levelClearedSound = SoundLoader.LoadAudioClip(_config.SuccessSound);
-            return levelClearedSound != null ? levelClearedSound : _emptySound;
-        }
-
-        private AudioClip GetCustomLevelFailedSound()
-        {
-            if (_lastFailedSoundSelected == _config.FailSound)
-            {
-                return _customLevelFailedSound;
-            }
-            _lastFailedSoundSelected = _config.FailSound;
-
-            if (_customLevelFailedSound != _emptySound)
-            {
-                Object.Destroy(_customLevelFailedSound);
-            }
-
-            var levelFailedSound = SoundLoader.LoadAudioClip(_config.FailSound);
-            return levelFailedSound != null ? levelFailedSound : _emptySound;
         }
 
         [AffinityPatch(typeof(ResultsViewController), nameof(ResultsViewController.DidActivate))]
@@ -71,9 +32,9 @@ namespace SoundReplacer.Patches
             // It may be preferable to instead play the custom sound separately
             _resultsViewController._levelClearedAudioClip = _config.SuccessSound switch
             {
-                SoundLoader.NoSoundID => _emptySound,
+                SoundLoader.NoSoundID => SoundLoader.Empty,
                 SoundLoader.DefaultSoundID => _originalLevelClearedSound,
-                _ => _customLevelClearedSound = GetCustomLevelClearedSound()
+                _ => _levelClearedSound = _soundLoader.Load(_levelClearedSound, SoundType.SuccessSound)
             };
 
             if (_resultsViewController._levelCompletionResults.levelEndStateType == LevelCompletionResults.LevelEndStateType.Failed
@@ -81,8 +42,8 @@ namespace SoundReplacer.Patches
             {
                 var failSound = _config.FailSound switch
                 {
-                    SoundLoader.NoSoundID => _emptySound,
-                    _ => _customLevelFailedSound = GetCustomLevelFailedSound()
+                    SoundLoader.NoSoundID => SoundLoader.Empty,
+                    _ => _levelFailedSound = _soundLoader.Load(_levelFailedSound, SoundType.FailSound)
                 };
                 _songPreviewPlayer.CrossfadeTo(failSound, -4f, 0f, failSound.length, null);
             }
@@ -90,15 +51,8 @@ namespace SoundReplacer.Patches
 
         public void Dispose()
         {
-            if (_customLevelClearedSound != _emptySound)
-            {
-                Object.Destroy(_customLevelClearedSound);
-            }
-
-            if (_customLevelFailedSound != _emptySound)
-            {
-                Object.Destroy(_customLevelFailedSound);
-            }
+            _soundLoader.Unload(SoundType.SuccessSound);
+            _soundLoader.Unload(SoundType.FailSound);
         }
     }
 }

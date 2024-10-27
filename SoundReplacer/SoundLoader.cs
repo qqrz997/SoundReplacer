@@ -1,44 +1,29 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using BeatSaberMarkupLanguage;
 using IPA.Utilities;
 using UnityEngine;
 using UnityEngine.Networking;
+using Object = UnityEngine.Object;
 
 namespace SoundReplacer
 {
-    internal static class SoundLoader
+    internal class SoundLoader : IDisposable
     {
         public const string NoSoundID = "None";
         public const string DefaultSoundID = "Default";
-        public static readonly string[] DefaultSoundList = { NoSoundID, DefaultSoundID };
+        public static readonly string[] DefaultSounds = { NoSoundID, DefaultSoundID };
+        // Duration of 1 second as NoteCutSoundEffect could disable itself before the note is cut otherwise.
+        public static readonly AudioClip Empty = AudioClip.Create("Empty", 44100, 1, 44100, false);
 
-        public static string[] SoundList = DefaultSoundList;
-        private static AudioClip? _emptyAudioClip;
+        private readonly PluginConfig _config;
 
-        public static void PopulateSoundList()
+        private readonly Dictionary<string, AudioClip> _soundCache = new();
+
+        private SoundLoader(PluginConfig config)
         {
-            try
-            {
-                var directoryInfo = new DirectoryInfo(Path.Combine(UnityGame.UserDataPath, nameof(SoundReplacer)));
-                directoryInfo.Create();
-                SoundList = SoundList
-                    .Concat(directoryInfo
-                        .EnumerateFiles("*", SearchOption.AllDirectories)
-                        .Where(f => f.Extension is ".ogg" or ".mp3" or ".wav")
-                        .Select(f => f.Name))
-                    .ToArray();
-            }
-            catch (Exception ex)
-            {
-                Plugin.Log.Error($"Could not create sound list. {ex}");
-            }
-        }
-
-        private static string GetFullPath(string name)
-        {
-            return Path.Combine(UnityGame.UserDataPath, nameof(SoundReplacer), name);
+            _config = config;
         }
 
         private static AudioType GetAudioTypeFromPath(string filePath)
@@ -53,24 +38,19 @@ namespace SoundReplacer
             };
         }
 
-        private static void SetConfigToDefault(string configName)
+        private AudioClip? LoadAudioClip(string fileName, SoundType soundType)
         {
-            // TODO: Find a saner solution than requesting the container from BSML.
-            var currentConfig = BeatSaberUI.DiContainer.Resolve<PluginConfig>();
-            foreach (var fieldInfo in currentConfig.GetType().GetFields())
-            {
-                if ((string)fieldInfo.GetValue(currentConfig) == configName)
-                {
-                    fieldInfo.SetValue(currentConfig, DefaultSoundID);
-                    break;
-                }
-            }
-        }
+            var filePath = Directory.EnumerateFiles(Path.Combine(UnityGame.UserDataPath, nameof(SoundReplacer)), fileName, SearchOption.AllDirectories).FirstOrDefault();
 
-        public static AudioClip? LoadAudioClip(string name)
-        {
-            var fullPath = GetFullPath(name);
-            var request = UnityWebRequestMultimedia.GetAudioClip(FileHelpers.GetEscapedURLForFilePath(fullPath), GetAudioTypeFromPath(fullPath));
+            if (filePath is null)
+            {
+                Plugin.Log.Error($"Could not find sound {fileName}");
+                _config.SetToDefault(soundType);
+
+                return null;
+            }
+
+            var request = UnityWebRequestMultimedia.GetAudioClip(FileHelpers.GetEscapedURLForFilePath(filePath), GetAudioTypeFromPath(filePath));
             var task = request.SendWebRequest();
 
             // while I would normally kill people for this
@@ -80,8 +60,8 @@ namespace SoundReplacer
 
             if (request.result is not UnityWebRequest.Result.Success)
             {
-                Plugin.Log.Error($"Failed to load file {fullPath} with error {request.error}");
-                SetConfigToDefault(name);
+                Plugin.Log.Error($"Failed to load file {filePath} with error {request.error}");
+                _config.SetToDefault(soundType);
 
                 return null;
             }
@@ -89,15 +69,54 @@ namespace SoundReplacer
             return DownloadHandlerAudioClip.GetContent(request);
         }
 
-        public static AudioClip GetEmptyAudioClip()
+        private string GetSoundFileName(SoundType soundType)
         {
-            if (_emptyAudioClip != null)
+            return soundType switch
             {
-                return _emptyAudioClip;
+                SoundType.GoodHitSound => _config.GoodHitSound,
+                SoundType.BadHitSound => _config.BadHitSound,
+                SoundType.MenuMusic => _config.MenuMusic,
+                SoundType.ClickSound => _config.ClickSound,
+                SoundType.SuccessSound => _config.SuccessSound,
+                SoundType.FailSound => _config.FailSound,
+                _ => throw new ArgumentOutOfRangeException(nameof(soundType))
+            };
+        }
+
+        public AudioClip Load(AudioClip? currentSound, SoundType soundType)
+        {
+            var fileName = GetSoundFileName(soundType);
+
+            if (_soundCache.TryGetValue(fileName, out var cachedSound) && cachedSound == currentSound)
+            {
+                return cachedSound;
             }
 
-            // Duration of 1 second as NoteCutSoundEffect could disable itself before the note is cut otherwise.
-            return _emptyAudioClip = AudioClip.Create("Empty", 44100, 1, 44100, false);
+            Object.Destroy(cachedSound);
+
+            var customSound = LoadAudioClip(fileName, soundType);
+            if (customSound == null)
+            {
+                return Empty;
+            }
+
+            return _soundCache[fileName] = customSound;
+        }
+
+        public void Unload(SoundType soundType)
+        {
+            if (_soundCache.TryGetValue(GetSoundFileName(soundType), out var cachedSound))
+            {
+                Object.Destroy(cachedSound);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var audioClip in _soundCache.Values)
+            {
+                Object.Destroy(audioClip);
+            }
         }
     }
 }

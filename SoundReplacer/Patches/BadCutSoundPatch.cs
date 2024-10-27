@@ -7,18 +7,16 @@ namespace SoundReplacer.Patches
 {
     internal class BadCutSoundPatch : IAffinity, IDisposable
     {
+        private readonly SoundLoader _soundLoader;
         private readonly PluginConfig _config;
-        private readonly AudioClip _emptySound = SoundLoader.GetEmptyAudioClip();
-        private readonly AudioClip[] _customBadCutSounds = new AudioClip[1];
 
+        private readonly AudioClip[] _badCutSounds = new AudioClip[1];
         private AudioClip[]? _originalBadCutSounds;
 
-        private string? _lastBadCutSoundSelected;
-
-        private BadCutSoundPatch(PluginConfig config)
+        private BadCutSoundPatch(SoundLoader soundLoader, PluginConfig config)
         {
+            _soundLoader = soundLoader;
             _config = config;
-            _customBadCutSounds[0] = _emptySound;
         }
 
         [AffinityPatch(typeof(EffectPoolsManualInstaller), nameof(EffectPoolsManualInstaller.ManualInstallBindings))]
@@ -32,8 +30,8 @@ namespace SoundReplacer.Patches
 
             if (_config.BadHitSound == SoundLoader.NoSoundID)
             {
-                _customBadCutSounds[0] = _emptySound;
-                noteCutSoundEffect._badCutSoundEffectAudioClips = _customBadCutSounds;
+                _badCutSounds[0] = SoundLoader.Empty;
+                noteCutSoundEffect._badCutSoundEffectAudioClips = _badCutSounds;
             }
             else if (_config.BadHitSound == SoundLoader.DefaultSoundID)
             {
@@ -41,36 +39,16 @@ namespace SoundReplacer.Patches
             }
             else
             {
-                _customBadCutSounds[0] = GetCustomBadCutSound();
-                noteCutSoundEffect._badCutSoundEffectAudioClips = _customBadCutSounds;
+                _badCutSounds[0] = _soundLoader.Load(_badCutSounds[0], SoundType.BadHitSound);
+                noteCutSoundEffect._badCutSoundEffectAudioClips = _badCutSounds;
             }
 
             __instance._noteCutSoundEffectPrefab = noteCutSoundEffect;
         }
 
-        private AudioClip GetCustomBadCutSound()
-        {
-            if (_lastBadCutSoundSelected == _config.BadHitSound)
-            {
-                return _customBadCutSounds[0];
-            }
-            _lastBadCutSoundSelected = _config.BadHitSound;
-
-            if (_customBadCutSounds[0] != _emptySound)
-            {
-                Object.Destroy(_customBadCutSounds[0]);
-            }
-
-            var badCutSound = SoundLoader.LoadAudioClip(_config.BadHitSound);
-            return badCutSound != null ? badCutSound : _emptySound;
-        }
-
         public void Dispose()
         {
-            if (_customBadCutSounds[0] != _emptySound)
-            {
-                Object.Destroy(_customBadCutSounds[0]);
-            }
+            _soundLoader.Unload(SoundType.BadHitSound);
         }
     }
 }

@@ -1,7 +1,10 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.IO;
+using System.Linq;
 using BeatSaberMarkupLanguage.Attributes;
 using BeatSaberMarkupLanguage.ViewControllers;
 using BeatSaberMarkupLanguage;
+using IPA.Utilities;
 using Zenject;
 
 namespace SoundReplacer.UI
@@ -14,6 +17,8 @@ namespace SoundReplacer.UI
         private PluginConfig _config = null!;
         private readonly BasicUIAudioManager _basicUIAudioManager = BeatSaberUI.BasicUIAudioManager;
 
+        private static string[] _sounds = SoundLoader.DefaultSounds;
+
         [Inject]
         private void Construct(SongPreviewPlayer songPreviewPlayer, PluginConfig config)
         {
@@ -21,8 +26,29 @@ namespace SoundReplacer.UI
             _config = config;
         }
 
-        [UIValue("good-hitsound-list")]
-        public List<object> SettingsGoodHitSoundList = new(SoundLoader.SoundList);
+        public void RefreshSoundList()
+        {
+            try
+            {
+                var directoryInfo = new DirectoryInfo(Path.Combine(UnityGame.UserDataPath, nameof(SoundReplacer)));
+                directoryInfo.Create();
+                _sounds = SoundLoader.DefaultSounds
+                    .Concat(directoryInfo
+                        .EnumerateFiles("*", SearchOption.AllDirectories)
+                        .Where(f => f.Extension is ".ogg" or ".mp3" or ".wav")
+                        .Select(f => f.Name))
+                    .ToArray();
+
+                NotifyPropertyChanged(nameof(SoundList));
+            }
+            catch (Exception ex)
+            {
+                Plugin.Log.Error($"Could not load sounds. {ex}");
+            }
+        }
+
+        [UIValue("sound-list")]
+        protected string[] SoundList => _sounds;
 
         [UIValue("good-hitsound")]
         protected string SettingCurrentGoodHitSound
@@ -31,18 +57,12 @@ namespace SoundReplacer.UI
             set => _config.GoodHitSound = value;
         }
 
-        [UIValue("bad-hitsound-list")]
-        public List<object> SettingsBadHitSoundList = new(SoundLoader.SoundList);
-
         [UIValue("bad-hitsound")]
         protected string SettingCurrentBadHitSound
         {
             get => _config.BadHitSound;
             set => _config.BadHitSound = value;
         }
-
-        [UIValue("menu-music-list")]
-        public List<object> SettingsMenuMusicList = new(SoundLoader.SoundList);
 
         [UIValue("menu-music")]
         protected string SettingCurrentMenuMusic
@@ -56,9 +76,6 @@ namespace SoundReplacer.UI
             }
         }
 
-        [UIValue("click-sound-list")]
-        public List<object> SettingsClickSoundList = new(SoundLoader.SoundList);
-
         [UIValue("click-sound")]
         protected string SettingCurrentClickSound
         {
@@ -70,18 +87,12 @@ namespace SoundReplacer.UI
             }
         }
 
-        [UIValue("success-sound-list")]
-        public List<object> SettingsSuccessSoundList = new(SoundLoader.SoundList);
-
         [UIValue("success-sound")]
         protected string SettingCurrentSuccessSound
         {
             get => _config.SuccessSound;
             set => _config.SuccessSound = value;
         }
-
-        [UIValue("fail-sound-list")]
-        public List<object> SettingsSuccessFailList = new(SoundLoader.SoundList);
 
         [UIValue("fail-sound")]
         protected string SettingCurrentFailSound
